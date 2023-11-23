@@ -84,26 +84,30 @@ class ccr_model():
 
             train_dataset = tf.data.Dataset.from_tensor_slices((self.train_features, train_target))
             val_dataset = tf.data.Dataset.from_tensor_slices((self.val_features, val_target))
-            #train_dataset = CustomDataset(self.train_features, train_target)
-            #val_dataset = CustomDataset(self.val_features, val_target)
 
             batch_size = self.model_config["batch_size"]
             self.train_dataset = train_dataset.batch(batch_size).shuffle(500)
             self.val_dataset = val_dataset.batch(batch_size).shuffle(500)
-            # self.train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-            # self.val_loader = val_dataset.ba DataLoader(val_dataset, batch_size=batch_size)
-
 
           def load_model_object(self):
             onnx_model = onnx.load(self.model_config["saved_model_path"])
-            model = onnx_to_keras(onnx_model,  ['inputs']) # what is the right input names param to pass?
+            output =[node.name for node in onnx_model.graph.output]
+
+            # Get input names https://github.com/onnx/onnx/issues/2657#issuecomment-618659414
+            input_all = [node.name for node in onnx_model.graph.input]
+            input_initializer =  [node.name for node in onnx_model.graph.initializer]
+            net_feed_input = list(set(input_all)  - set(input_initializer))
+
+            print('Inputs: ', net_feed_input)
+            print('Outputs: ', output)
+            # name_policy="renumerate" https://stackoverflow.com/questions/71882731/scope-name-error-when-converting-pretrained-model-from-pytorch-to-keras
+            model = onnx_to_keras(onnx_model,  net_feed_input, name_policy="renumerate")
             self.model=model
 
-
           def load_model_optimizer(self):
+            self.optimizer = keras.optimizers.Adam()
             #self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
             #self.optimizer = optim.Adam(self.model.parameters())
-            self.optimizer = keras.optimizers.Adam(self.model.parameters())
             #optimizer=torch.load(self.model_config["saved_model_optimizer"])
             #self.optimizer=optimizer
 
@@ -119,6 +123,7 @@ class ccr_model():
           def execute_model(self):
             self.logger_list=[]
             criterion = tf.keras.losses.MeanSquaredError()
+            self.model.compile(loss=criterion, optimizer=self.optimizer)
             epochs = self.model_config["total_epochs"]
             self.model.fit(self.train_dataset, epochs=epochs)
 
@@ -126,20 +131,6 @@ class ccr_model():
             print('Writing training model to ' + output_path)
             onnx_model, _ = tf2onnx.convert.from_keras(self.model)
             onnx.save(onnx_model, output_path)
-
-            # for epoch in range(self.model_config["total_epochs"]):
-            #   for inputs, labels in self.train_loader:
-            #       self.optimizer.zero_grad()
-            #       outputs = self.model(inputs)
-            #       loss = criterion(outputs, labels.unsqueeze(1))
-            #       loss.backward()
-            #       self.optimizer.step()
-            #   self.logger_list.append('Epoch [{epoch+1}/{self.model_config["total_epochs"]}], Loss: {loss.item():.4f}')
-            #   print(f'Epoch [{epoch+1}/{self.model_config["total_epochs"]}], Loss: {loss.item():.4f}')
-
-            # output_path=self.model_config["trained_model_output_path"]
-            # print('Writing training model to ' + output_path)
-            # torch.onnx.export(self.model, torch.randn(1, self.train_features.shape[1]), output_path, verbose=True)
 
           def ccr_model_run(self):
             self.load_data()
